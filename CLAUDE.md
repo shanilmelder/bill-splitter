@@ -17,6 +17,14 @@ then relay its final summary. Do not perform any pipeline step yourself, and
 do not read the rest of this file as instructions for yourself — the sections
 below describe `orchestrator-agent`'s job.
 
+One exception, because you can ask a person and a subagent cannot: if the
+orchestrator comes back with `## Story Selection Required` (see `## Story
+selection checkpoint`), put the choice to the user with AskUserQuestion —
+implement all the listed stories sequentially, implement one story you list
+as an option, or stop here — then spawn `orchestrator-agent` again with that
+answer stated explicitly, pasting in the story list and execution order it
+gave you. "Stop" means relay the story list and end.
+
 Requires nested subagent support (Claude Code v2.1.172+). If your version
 doesn't support a subagent spawning subagents, `orchestrator-agent` will fail
 when it spawns research-agent — check `claude --version`.
@@ -34,8 +42,16 @@ AUTONOMOUS_MODE: true
 REQUIREMENTS_MODE: true
 REQUIREMENTS_DOC: docs/bill-splitter/requirement.md
 JIRA_PROJECT_KEY: BS
+STORY_APPROVAL: true
 REVIEWER_BOT_GITHUB_USERNAME: revieweragent2
 QA_BOT_GITHUB_USERNAME: qaagent3
+JIRA_ASSIGNMENT: true
+RESEARCH_BOT_JIRA_ACCOUNT: pipeline-research-bot
+BACKEND_BOT_JIRA_ACCOUNT: pipeline-backend-bot
+FRONTEND_BOT_JIRA_ACCOUNT: pipeline-frontend-bot
+REVIEWER_BOT_JIRA_ACCOUNT: pipeline-reviewer-bot
+QA_BOT_JIRA_ACCOUNT: pipeline-qa-bot
+ORCHESTRATOR_BOT_JIRA_ACCOUNT: pipeline-orchestrator-bot
 ```
 
 `AUTONOMOUS_MODE` is the project-wide default and the single source of truth —
@@ -57,6 +73,22 @@ never both: a ticket ID means the story already exists.
 `REQUIREMENTS_DOC` is the document `ba-agent` reads when requirements mode is
 on and no path was given for the run. `JIRA_PROJECT_KEY` is the project
 `ba-agent` creates stories in; both are ignored when requirements mode is off.
+
+`STORY_APPROVAL` controls what happens the moment `ba-agent` finishes.
+When `true` (the default), a requirements-mode run **stops after the stories
+are created** and hands the story list back so a person can choose: implement
+all of them sequentially, or implement one selected story now. When `false`,
+the run continues straight into the whole execution order without asking. It
+is overridable per run in either direction ("split the doc and implement
+everything" forces it off; "show me the stories first" forces it on). See
+`## Story selection checkpoint`. Ignored when requirements mode is off — a
+ticket-ID run has nothing to choose between.
+
+`JIRA_ASSIGNMENT` controls whether the orchestrator reassigns the ticket to
+the bot account of whichever agent is currently working on it (see `## Jira
+assignment`). The `*_BOT_JIRA_ACCOUNT` values are the accounts it assigns to
+— a display name, email, or account ID; the orchestrator resolves each to an
+account ID once per run. They matter only when `JIRA_ASSIGNMENT` is `true`.
 
 ## Tech Stack
 
@@ -100,9 +132,9 @@ a specific bot account.
 
 | Role               | GitHub alias          | Jira alias          | Used for                                                                     |
 | ------------------ | --------------------- | ------------------- | ---------------------------------------------------------------------------- |
-| orchestrator-agent | `github-orchestrator` | `jira-orchestrator` | merging PRs, all status transitions, summary comments                        |
+| orchestrator-agent | `github-orchestrator` | `jira-orchestrator` | merging PRs, all status transitions, all assignee changes, summary comments   |
 | ba-agent           | —                     | `jira-ba`           | creating and linking stories from a requirement doc (requirements mode only) |
-| research-agent     | —                     | `jira-research`     | reading ticket/context only                                                  |
+| research-agent     | —                     | `jira-research`     | reading ticket/context, posting its own research brief as a ticket comment    |
 | backend-agent      | `github-backend`      | —                   | branch, commit, open/update PR (backend)                                     |
 | frontend-agent     | `github-frontend`     | —                   | branch, commit, open/update PR (frontend)                                    |
 | reviewer-agent     | `github-reviewer`     | —                   | reading diff, submitting review, comments                                    |
@@ -114,7 +146,12 @@ even on a shared branch, so commit history attributes each domain's changes to
 the right bot.
 
 Use `mcp__github-orchestrator__...` / `mcp__jira-orchestrator__...` for merges,
-transitions, and comments.
+transitions, assignee changes, and your own summary comments.
+
+Each agent's *own* work product is commented under its *own* Jira alias, not
+yours. In particular the research brief is posted by `research-agent` via
+`jira-research` — never by you and never by `ba-agent`. Yours are the
+transition, assignment, and end-of-run summary comments.
 
 ## Subagents available
 
@@ -146,6 +183,35 @@ explaining why, rather than forcing a status that doesn't reflect reality.
 - Every transition is a real action. If a transition call fails, surface the
 error rather than treating the ticket as if it moved.
 
+## Jira assignment
+
+The assignee field answers "who is holding this right now". When
+`JIRA_ASSIGNMENT` is `true`, you — never a subagent — keep it truthful by
+reassigning the ticket to the bot account of the agent you are delegating to,
+**immediately before** you spawn it, using `editJiraIssue` with the
+`assignee` field.
+
+| When you spawn | Assign to |
+| --- | --- |
+| `research-agent` | `RESEARCH_BOT_JIRA_ACCOUNT` |
+| a single implementer | that implementer's bot (`BACKEND_` / `FRONTEND_BOT_JIRA_ACCOUNT`) |
+| both implementers, first pass | the one you spawn *first* (the branch owner), then the second when you spawn it |
+| both implementers, in parallel on a retry | the one that owns the branch — name both in the comment you post |
+| `reviewer-agent` + `qa-agent` | `REVIEWER_BOT_JIRA_ACCOUNT` — one field, two agents; say in the comment that QA is running too |
+| the merge (step 8 onward) | `ORCHESTRATOR_BOT_JIRA_ACCOUNT`, and leave it there at `Done` |
+
+- Resolve the configured account names to account IDs **once per run**, with
+`lookupJiraAccountId`, and reuse the IDs for every later assignment — same
+discipline as transition IDs.
+- Assignment is bookkeeping, not a gate. If a lookup returns nothing, or an
+assignment call fails (commonly: the bot lacks *Assignable User* in the
+project), **note it and carry on with the pipeline** — never stop a run over
+an assignee. Report it once at the end rather than retrying on every step.
+- If the pipeline stops early, leave the assignee on the agent whose stage
+stopped, so the ticket shows where it was dropped.
+- When `JIRA_ASSIGNMENT` is `false`, skip all of this and leave the assignee
+untouched.
+
 ## Pipeline
 
 Given a Jira ticket ID (e.g. "run the pipeline on PROJ-123"), start at step 1.
@@ -161,9 +227,14 @@ Given a requirement document (see `REQUIREMENTS_MODE`), start at step 0.
    silence about *how* as a gap to fill in yourself when you spawn it.
   - If it returns `BLOCKED: yes`, stop and report — no stories exist, so
   there is nothing to run. Do not invent stories yourself.
-  - Otherwise take `## Execution Order` and run **steps 1–8 in full, once per
-  story, one story at a time, in that order**. Each story is an ordinary
-  ticket-ID run from step 1 onward; nothing below changes.
+  - Otherwise check `STORY_APPROVAL` (subject to any per-run override). When
+  it is `true`, **stop here** and hand the story list back for a human
+  choice — see `## Story selection checkpoint`. The stories exist in Jira,
+  so nothing is lost by stopping.
+  - When `STORY_APPROVAL` is `false`, or the run already told you which
+  stories to implement, take `## Execution Order` and run **steps 1–8 in
+  full, once per story, one story at a time, in that order**. Each story is
+  an ordinary ticket-ID run from step 1 onward; nothing below changes.
   - Stories run sequentially, not in parallel, even when `## Stories` marks
   them independent: they share one repo and one main branch, and a second
   story branched before the first merged is a rebase you'd have to babysit.
@@ -234,13 +305,53 @@ Given a requirement document (see `REQUIREMENTS_MODE`), start at step 0.
  protection requires a review you don't have, or the branch is behind),
  report that; do not work around it.
 
+## Story selection checkpoint
+
+Requirements mode turns one document into several stories, and which of them
+to build now — all of them, or just one — is a product call, not yours. So
+with `STORY_APPROVAL: true`, splitting and implementing are two separate
+runs.
+
+You cannot pause mid-run and wait for an answer. Instead, end your turn right
+after `ba-agent` returns, and make your final response the thing the main
+session needs to put the choice to a person:
+
+```
+## Story Selection Required
+<the story list — key, title, DEPENDS_ON, one-line scope, in execution order>
+
+EXECUTION_ORDER: KAN-11, KAN-12, KAN-13
+<ba-agent's ## Notes for the Orchestrator, and anything it flagged>
+```
+
+Leave every story at `To Do`, assign nothing, and do not start step 1 for any
+of them. The main session asks the person which way to go and spawns you
+again with the answer:
+
+- **implement all** — a fresh requirements-mode run that skips `ba-agent`
+ (the stories already exist) and runs steps 1–8 once per story in the given
+ execution order.
+- **one story** — an ordinary ticket-ID run on the story they picked. If it
+ `DEPENDS_ON` a story that isn't `Done`, say so in your final report and
+ implement it anyway — the person chose it knowing the order.
+- **stop** — nothing further runs; the stories stay in Jira for later.
+
+When a run arrives already carrying that answer, honour it and never re-split
+the document — a second `ba-agent` pass would duplicate the stories.
+
 ## Rules
 
-- Never let a subagent merge a PR or transition the Jira ticket — those stay
-with you. `ba-agent` is the one subagent that *creates* Jira issues; it
-still never transitions them. reviewer-agent and qa-agent DO submit real
-GitHub reviews under their own accounts; that's intentional. backend-agent and frontend-agent
+- Never let a subagent merge a PR, transition the Jira ticket, or change its
+assignee — those stay with you. `ba-agent` is the one subagent that
+*creates* Jira issues; it still never transitions or assigns them.
+reviewer-agent and qa-agent DO submit real GitHub reviews under their own
+accounts; that's intentional. backend-agent and frontend-agent
 must never approve or review their own or each other's PR.
+- Each agent posts its own work product under its own Jira/GitHub identity:
+research-agent comments its brief on the ticket itself, reviewer-agent and
+qa-agent leave their own PR reviews. Don't relay another agent's output as a
+comment from you — a brief posted under the wrong account misattributes who
+decided what.
 - Always pass full context explicitly in each subagent prompt — ticket text,
 acceptance criteria, branch name, PR number, head SHA, prior feedback, the
 interface contract, and (for implementers) whether they own the branch.

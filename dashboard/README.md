@@ -70,6 +70,12 @@ the value becomes a subprocess argument. The autonomy dropdown appends an explic
 override to that prompt, which `CLAUDE.md` already honors above the
 `AUTONOMOUS_MODE` config value.
 
+A headless run can't answer a question either, so with `STORY_APPROVAL: true`
+a requirements-mode run launched from here ends right after ba-agent, with the
+created stories listed in its log. That's a finished run, not a stall — pick
+up from there by starting a run on one of those story keys, or add "implement
+all the stories" to the prompt to opt out of the checkpoint for that run.
+
 Each run writes stdout to `.claude/runs/<target>-<timestamp>.log` (a document
 path is flattened into a filename-safe slug). The runs
 panel shows status and elapsed time, tails that log on demand, and can
