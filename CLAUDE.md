@@ -33,7 +33,7 @@ A live dashboard of pipeline activity is available — `python3 dashboard/server
 AUTONOMOUS_MODE: true
 REQUIREMENTS_MODE: true
 REQUIREMENTS_DOC: docs/bill-splitter/requirement.md
-JIRA_PROJECT_KEY: KAN
+JIRA_PROJECT_KEY: BS
 REVIEWER_BOT_GITHUB_USERNAME: revieweragent2
 QA_BOT_GITHUB_USERNAME: qaagent3
 ```
@@ -253,4 +253,3 @@ output: reviewer + QA always; backend + frontend on retry passes when the
 feedback spans both.
 - Retry cap is 3 full cycles per ticket, counted across review and QA
 together.
-
