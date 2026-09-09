@@ -52,16 +52,30 @@ the Vite dev server hosts the frontend instead.
 
 ## Frontend
 
-The frontend lives in `frontend/` and is added by the frontend work for this
-ticket. Once it is present:
+The frontend lives in `frontend/` — React 19 + Vite + TypeScript (strict) +
+Tailwind, tested with Vitest and React Testing Library.
 
 ```bash
 cd frontend
 npm install
-npm run dev     # http://localhost:5173, proxies /api to http://localhost:5170
-npm test        # Vitest + React Testing Library
-npm run build   # emits frontend/dist
+npm run dev        # http://localhost:5173, proxies /api to http://localhost:5170
+npm test           # Vitest + React Testing Library, single run
+npm run test:watch # the same suite in watch mode
+npm run typecheck  # tsc --noEmit
+npm run build      # typecheck, then emit frontend/dist
 ```
+
+All bill state and all split arithmetic live in the browser. Money is held as
+integer cents everywhere and formatted only at the render edge:
+
+```
+frontend/src/lib/money/amount.ts     parseAmountToCents, formatCents
+frontend/src/lib/money/apportion.ts  apportion (largest remainder), reconcile
+frontend/src/features/bill/          BillPage, ParticipantList, TotalInput, useBill
+```
+
+`src/lib/**` is pure — no React imports, no bill-shaped types — so the
+apportionment algorithm stays reusable and directly testable.
 
 ## Publishing
 
