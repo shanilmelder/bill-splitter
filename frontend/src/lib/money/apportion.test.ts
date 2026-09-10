@@ -31,6 +31,10 @@ describe('apportion', () => {
     expect(apportion(1000, [2, 1, 1])).toEqual([500, 250, 250]);
   });
 
+  it('splits 100.00 as 1 and 3 shares into 25.00 and 75.00 (BS-28)', () => {
+    expect(apportion(10000, [1, 3])).toEqual([2500, 7500]);
+  });
+
   it('rejects inputs that would break the invariant', () => {
     expect(() => apportion(-1, [1])).toThrow(RangeError);
     expect(() => apportion(10.5, [1])).toThrow(RangeError);

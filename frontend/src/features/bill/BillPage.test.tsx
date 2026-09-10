@@ -214,6 +214,82 @@ describe('BillPage', () => {
     expect(within(amountsRegion()).queryAllByRole('listitem')).toHaveLength(0);
   });
 
+  it('shows a share count of 1 for every participant by default', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    await addParticipants(user, 1);
+
+    expect(screen.getByLabelText('Participant 1 shares')).toHaveValue('1');
+    expect(screen.getByLabelText('Participant 2 shares')).toHaveValue('1');
+  });
+
+  it('splits evenly when share counts are left untouched, same as BS-27', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    await addParticipants(user, 2);
+    await user.type(totalField(), '10.00');
+
+    const rows = amountRows();
+    expect(within(rows[0] as HTMLElement).getByText('3.34')).toBeInTheDocument();
+    expect(within(rows[1] as HTMLElement).getByText('3.33')).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByText('3.33')).toBeInTheDocument();
+  });
+
+  it('gives a participant on 3 shares three times the amount of one on 1 share, for 100.00', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    await addParticipants(user, 1);
+    const sharesField = screen.getByLabelText('Participant 2 shares');
+    await user.clear(sharesField);
+    await user.type(sharesField, '3');
+    await user.type(totalField(), '100.00');
+
+    const rows = amountRows();
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0] as HTMLElement).getByText('25.00')).toBeInTheDocument();
+    expect(within(rows[1] as HTMLElement).getByText('75.00')).toBeInTheDocument();
+  });
+
+  it('still sums to exactly 10.00 across three participants all on 1 share', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    await addParticipants(user, 2);
+    await user.type(totalField(), '10.00');
+
+    const region = amountsRegion();
+    expect(within(region).getAllByText('10.00')).toHaveLength(2);
+  });
+
+  it('shows an inline message and no amounts for an invalid share count', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    await addParticipants(user, 1);
+    const sharesField = screen.getByLabelText('Participant 2 shares');
+    await user.clear(sharesField);
+    await user.type(sharesField, '0');
+    await user.type(totalField(), '10.00');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('A share count must be at least 1.');
+    expect(within(amountsRegion()).queryAllByRole('listitem')).toHaveLength(0);
+  });
+
+  it('refuses a share count above the 1000 upper bound', async () => {
+    const user = userEvent.setup();
+    render(<BillPage />);
+
+    const sharesField = screen.getByLabelText('Participant 1 shares');
+    await user.clear(sharesField);
+    await user.type(sharesField, '1001');
+    await user.type(totalField(), '10.00');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('A share count cannot be more than 1000.');
+  });
+
   it('shows an error instead of amounts when the splitter cannot answer', async () => {
     const user = userEvent.setup();
     render(

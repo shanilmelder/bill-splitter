@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { parseAmountToCents, type AmountParseError } from '../../lib/money/amount';
 import { apportion, reconcile } from '../../lib/money/apportion';
-import type { BillState, Participant, ParticipantId, Splitter } from './types';
+import {
+  parseShareCount,
+  type BillState,
+  type Participant,
+  type ParticipantId,
+  type ShareParseError,
+  type Splitter,
+} from './types';
 
 /**
  * What the screen should render right now, derived from `BillState`.
@@ -9,11 +16,13 @@ import type { BillState, Participant, ParticipantId, Splitter } from './types';
  * - `no-total`  — nothing entered yet; not an error, just no amounts to show.
  * - `invalid`   — the total was refused; show an inline message, no amounts.
  * - `ok`        — amounts that provably add up to the total.
+ * - `invalid-shares` — a share count was refused; show an inline message, no amounts.
  * - `mismatch`  — the split did not add up; show an error, never the amounts.
  */
 export type BillSplit =
   | { kind: 'no-total' }
   | { kind: 'invalid'; error: AmountParseError }
+  | { kind: 'invalid-shares'; participantId: ParticipantId; error: ShareParseError }
   | { kind: 'ok'; totalCents: number; shares: number[]; sumCents: number }
   /** `sumCents` is null when the splitter threw rather than answering. */
   | { kind: 'mismatch'; totalCents: number; sumCents: number | null };
@@ -31,12 +40,13 @@ export interface UseBill {
   addParticipant: () => void;
   removeParticipant: (id: ParticipantId) => void;
   renameParticipant: (id: ParticipantId, name: string) => void;
+  setParticipantShares: (id: ParticipantId, value: string) => void;
   /** A bill always has at least one participant, so zero is never reachable. */
   canRemoveParticipant: boolean;
 }
 
 function newParticipant(): Participant {
-  return { id: crypto.randomUUID(), name: '' };
+  return { id: crypto.randomUUID(), name: '', shareInput: '1' };
 }
 
 /** A new bill starts empty: one participant, no name, no total, no items. */
@@ -84,6 +94,15 @@ export function useBill(options: UseBillOptions = {}): UseBill {
     }));
   }, []);
 
+  const setParticipantShares = useCallback((id: ParticipantId, value: string) => {
+    setState((current) => ({
+      ...current,
+      participants: current.participants.map((participant) =>
+        participant.id === id ? { ...participant, shareInput: value } : participant,
+      ),
+    }));
+  }, []);
+
   const split = useMemo<BillSplit>(() => {
     const parsed = parseAmountToCents(state.totalInput);
     if (!parsed.ok) {
@@ -91,8 +110,18 @@ export function useBill(options: UseBillOptions = {}): UseBill {
     }
 
     const totalCents = parsed.cents;
-    // BS-27 splits evenly, so every weight is 1. BS-28 onwards varies these.
-    const weights = state.participants.map(() => 1);
+
+    // Every share count is parsed before any splitting happens; the first
+    // one that fails blocks amounts entirely rather than silently falling
+    // back to a share of 1.
+    const weights: number[] = [];
+    for (const participant of state.participants) {
+      const parsedShare = parseShareCount(participant.shareInput);
+      if (!parsedShare.ok) {
+        return { kind: 'invalid-shares', participantId: participant.id, error: parsedShare.error };
+      }
+      weights.push(parsedShare.shares);
+    }
 
     let shares: number[];
     try {
@@ -128,6 +157,7 @@ export function useBill(options: UseBillOptions = {}): UseBill {
     addParticipant,
     removeParticipant,
     renameParticipant,
+    setParticipantShares,
     canRemoveParticipant: state.participants.length > 1,
   };
 }

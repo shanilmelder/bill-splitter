@@ -6,6 +6,59 @@ export interface Participant {
   id: ParticipantId;
   /** Raw user input. May be `''` — names are optional. */
   name: string;
+  /**
+   * Raw user input for the share count. Defaults to `'1'`, so an untouched
+   * bill splits evenly with no extra input needed. Kept as text (not a
+   * number) for the same reason `totalInput` is: the user's typing survives
+   * validation instead of being silently rewritten.
+   */
+  shareInput: string;
+}
+
+export type ShareParseError = 'EMPTY' | 'INVALID' | 'TOO_SMALL' | 'TOO_LARGE';
+
+export type ShareParseResult =
+  | { ok: true; shares: number }
+  | { ok: false; error: ShareParseError };
+
+/** A share count above this would risk `apportion`'s `totalCents * weight`
+ * multiplication overflowing `Number.MAX_SAFE_INTEGER` and corrupting the
+ * split — this is a correctness guard, not an arbitrary UI limit. */
+export const MAX_SHARE_COUNT = 1000;
+
+const SHARE_PATTERN = /^\d+$/;
+
+/**
+ * Parse a participant's raw share-count text into a positive integer.
+ *
+ * Fractional shares are out of scope: anything that is not a bare positive
+ * integer is refused rather than coerced, mirroring `parseAmountToCents`.
+ */
+export function parseShareCount(input: string): ShareParseResult {
+  const trimmed = input.trim();
+
+  if (trimmed === '') {
+    return { ok: false, error: 'EMPTY' };
+  }
+
+  if (!SHARE_PATTERN.test(trimmed)) {
+    return { ok: false, error: 'INVALID' };
+  }
+
+  const shares = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(shares)) {
+    return { ok: false, error: 'INVALID' };
+  }
+
+  if (shares < 1) {
+    return { ok: false, error: 'TOO_SMALL' };
+  }
+
+  if (shares > MAX_SHARE_COUNT) {
+    return { ok: false, error: 'TOO_LARGE' };
+  }
+
+  return { ok: true, shares };
 }
 
 /**
