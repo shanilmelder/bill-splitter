@@ -6,6 +6,7 @@ export interface ParticipantListProps {
   onAdd: () => void;
   onRemove: (id: ParticipantId) => void;
   onRename: (id: ParticipantId, name: string) => void;
+  onShareChange: (id: ParticipantId, value: string) => void;
 }
 
 const MIN_PARTICIPANTS_HINT_ID = 'participants-minimum-hint';
@@ -23,6 +24,7 @@ export function ParticipantList({
   onAdd,
   onRemove,
   onRename,
+  onShareChange,
 }: ParticipantListProps) {
   return (
     <section aria-labelledby="participants-heading" className="flex flex-col gap-3">
@@ -48,6 +50,24 @@ export function ParticipantList({
                 placeholder={displayName(participant, index)}
                 onChange={(event) => onRename(participant.id, event.target.value)}
                 className="min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1 sm:w-24">
+              <label
+                htmlFor={`participant-shares-${participant.id}`}
+                className="text-sm font-medium text-slate-700"
+              >
+                {`Participant ${index + 1} shares`}
+              </label>
+              <input
+                id={`participant-shares-${participant.id}`}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={participant.shareInput}
+                onChange={(event) => onShareChange(participant.id, event.target.value)}
+                className="min-h-[44px] w-full rounded-lg border border-slate-300 px-3 py-2 text-right tabular-nums shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400"
               />
             </div>
 

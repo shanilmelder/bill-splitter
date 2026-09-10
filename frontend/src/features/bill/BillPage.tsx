@@ -2,7 +2,14 @@ import { formatCents } from '../../lib/money/amount';
 import { ParticipantList } from './ParticipantList';
 import { TotalInput } from './TotalInput';
 import { useBill } from './useBill';
-import { displayName, type Splitter } from './types';
+import { displayName, type ShareParseError, type Splitter } from './types';
+
+const SHARE_ERROR_MESSAGES: Record<ShareParseError, string> = {
+  EMPTY: 'Enter a share count for every participant, for example 1.',
+  INVALID: 'Enter a share count as a whole number, for example 1, 2 or 3.',
+  TOO_SMALL: 'A share count must be at least 1.',
+  TOO_LARGE: 'A share count cannot be more than 1000.',
+};
 
 export interface BillPageProps {
   /**
@@ -39,6 +46,7 @@ export function BillPage({ splitter }: BillPageProps) {
         onAdd={bill.addParticipant}
         onRemove={bill.removeParticipant}
         onRename={bill.renameParticipant}
+        onShareChange={bill.setParticipantShares}
       />
 
       <section aria-labelledby="items-heading" className="flex flex-col gap-2">
@@ -46,7 +54,8 @@ export function BillPage({ splitter }: BillPageProps) {
           Items
         </h2>
         <p className="text-sm text-slate-600">
-          No items yet. This bill is split evenly between everyone at the table.
+          No items yet. This bill is split between everyone at the table in proportion to their
+          shares.
         </p>
       </section>
 
@@ -65,6 +74,12 @@ export function BillPage({ splitter }: BillPageProps) {
           {split.kind === 'invalid' && (
             <p className="text-sm text-slate-600">
               No amounts yet — correct the bill total above.
+            </p>
+          )}
+
+          {split.kind === 'invalid-shares' && (
+            <p role="alert" className="text-sm font-medium text-red-700">
+              {SHARE_ERROR_MESSAGES[split.error]}
             </p>
           )}
 
